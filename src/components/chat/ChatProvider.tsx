@@ -19,6 +19,7 @@ interface ChatContextType {
   currentChat: Chat | null
   addMessage: (role: ChatMessage['role'], content: string) => void
   forkChat: (messageIndex: number, title?: string) => string
+  forkFromSelection: (selectedText: string, messageIndex: number, prompt: string) => string
   createNewChat: (title: string, parentId?: string | null) => string
   deleteChat: (chatId: string) => void
   renameChat: (chatId: string, title: string) => void
@@ -101,6 +102,67 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       setCurrentChatId(newChat.id)
       return newChat.id
+    },
+    [currentChatId, updateStore]
+  )
+
+  const forkFromSelection = useCallback(
+    (selectedText: string, messageIndex: number, prompt: string): string => {
+      const parentChat = storeRef.current.chats[currentChatId]
+      if (!parentChat) return currentChatId
+
+      const inheritedMessages = parentChat.messages.slice(0, messageIndex + 1)
+      const newChat = createChat(selectedText, currentChatId, messageIndex, inheritedMessages)
+
+      // Add the user's prompt as the first new message in the forked chat
+      const userMsg = createMessage('user', prompt)
+      newChat.messages.push(userMsg)
+
+      const linkMsg = createMessage(
+        'system',
+        `Создана ветка: ${createInternalLink(newChat.id, selectedText)}`
+      )
+
+      const newChatId = newChat.id
+
+      updateStore((s) => ({
+        ...s,
+        chats: {
+          ...s.chats,
+          [newChatId]: newChat,
+          [currentChatId]: {
+            ...s.chats[currentChatId],
+            messages: [...s.chats[currentChatId].messages, linkMsg],
+          },
+        },
+        keywords: {
+          ...s.keywords,
+          [selectedText]: newChatId,
+        },
+      }))
+
+      setCurrentChatId(newChatId)
+
+      // Simulate assistant response in the new chat
+      setTimeout(() => {
+        const response = `Вы спросили про "${selectedText}": "${prompt}"\n\nДавайте разберём это подробнее. Этот чат унаследовал контекст из родительского разговора, так что мы можем продолжить с того места, где остановились.`
+        setStore((prev) => {
+          const c = prev.chats[newChatId]
+          if (!c) return prev
+          return {
+            ...prev,
+            chats: {
+              ...prev.chats,
+              [newChatId]: {
+                ...c,
+                messages: [...c.messages, createMessage('assistant', response)],
+              },
+            },
+          }
+        })
+      }, 500)
+
+      return newChatId
     },
     [currentChatId, updateStore]
   )
@@ -228,6 +290,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         currentChat,
         addMessage,
         forkChat,
+        forkFromSelection,
         createNewChat,
         deleteChat,
         renameChat,
